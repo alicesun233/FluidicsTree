@@ -20,7 +20,6 @@ classdef progress < handle
         end
         
         function delete(h)
-            
             fprintf('\n')
         end
         
