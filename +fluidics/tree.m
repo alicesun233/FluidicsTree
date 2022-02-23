@@ -6,14 +6,23 @@ scriptConfig = struct('FileName','treeConfig.mat',...
 % in the .mat file if they do not exist
 scriptConfig.Path = fullfile(scriptConfig.Folder,scriptConfig.FileName);
 treeConfig = matfile(scriptConfig.Path,'Writable',true);
+if isempty(who(treeConfig,'InputFolder'))
+    treeConfig.InputFolder = '';
+end
+if isempty(who(treeConfig,'InputPattern'))
+    treeConfig.InputPattern = [];
+end
 if isempty(who(treeConfig,'TimeConfigured'))
     treeConfig.TimeConfigured = [];
-    treeConfig.InputFolder = '';
-    treeConfig.InputPattern = '';
 end
 if isempty(who(treeConfig,'TimeValidated'))
     treeConfig.TimeValidated = [];
+end
+if isempty(who(treeConfig,'TimePhaseSegmented'))
     treeConfig.TimePhaseSegmented = [];
+end
+if isempty(who(treeConfig,'TimeParticleSegmented'))
+    treeConfig.TimeParticleSegmented = [];
 end
 fprintf('Loaded config file: %s\n',treeConfig.Properties.Source)
 
@@ -114,7 +123,7 @@ if isempty(treeConfig.TimePhaseSegmented)
             imageMinimum = min(imageMinimum,frame);
             imageMaximum = max(imageMaximum,frame);
         end
-        tempBar.update(k,listing(k).name);
+        tempBar.update(k,listing(k).name)
     end
     delete(tempBar)
     % Biniarize the range image
@@ -138,4 +147,29 @@ end
 
 % Cleanup
 fprintf('Segmentation of phases completed: %s\n',datestr(treeConfig.TimePhaseSegmented));
+clear temp*
+
+%% Step 2: Segmentation of fluorescent particles
+if isempty(treeConfig.TimeParticleSegmented)
+    particles = repmat(struct('Coordinates',[]),length(listing),1);
+    % Ensure that all frames are of the same size
+    fprintf('Particle segmentation:\n')
+    tempBar = fluidics.ui.progress(0,length(listing),'Initializing');
+    for k = 1:length(listing)
+        % Binarize input image masked by the fluid phase
+        frame = imread(fullfile(listing(k).folder,listing(k).name));
+        frame = frame-imageMinimum;
+        particles(k) = fluidics.ip.particles(frame,maskFluid);
+        tempBar.update(k,listing(k).name)
+    end
+    delete(tempBar)
+    % Timestamp results
+    treeConfig.Particles = frames;
+    treeConfig.TimeParticleSegmented = datetime;
+else
+    particles = treeConfig.Particles;
+end
+
+% Cleanup
+fprintf('Particle segmentation completed: %s\n',datestr(treeConfig.TimeParticleSegmented));
 clear temp*
