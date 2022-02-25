@@ -24,6 +24,15 @@ end
 if isempty(who(treeConfig,'TimeParticleSegmented'))
     treeConfig.TimeParticleSegmented = [];
 end
+if isempty(who(treeConfig,'TimeParticleFiltered'))
+    treeConfig.TimeParticleFiltered = [];
+end
+if isempty(who(treeConfig,'TimeFreeBoundary'))
+    treeConfig.TimeFreeBoundary = [];
+end
+if isempty(who(treeConfig,'TimeDisplacementFronts'))
+    treeConfig.TimeDisplacementFronts = [];
+end
 fprintf('Loaded config file: %s\n',treeConfig.Properties.Source)
 
 %% Ask user if they want to use or update current settings
@@ -72,14 +81,13 @@ fprintf('Configuration completed: %s\n',datestr(treeConfig.TimeConfigured));
 clear temp*
 
 %% Validation
+fprintf('[Input Validation]\n')
 
 % Read a listing
 listing = dir(fullfile(treeConfig.InputFolder,treeConfig.InputPattern));
-
-% Skip if already validated
 if isempty(treeConfig.TimeValidated)
     % Ensure that all frames are of the same size
-    fprintf('Checking image size:\n')
+    fprintf('Checking frame sizes...\n')
     tempBar = fluidics.ui.progress(0,length(listing),'Initializing');
     for k = 1:length(listing)
         tempPath = fullfile(listing(k).folder,listing(k).name);
@@ -104,14 +112,13 @@ elseif ~isempty(listing)
 end
 
 % Cleanup
-fprintf('Input validation completed: %s\n',datestr(treeConfig.TimeValidated));
+fprintf('Completed: %s\n',datestr(treeConfig.TimeValidated));
 clear temp*
 
 %% Step 1: Segmentation of the solid phase
-
-% Skip if the solid phase has been found
+fprintf('[Phase Segmentation]\n')
 if isempty(treeConfig.TimePhaseSegmented)
-    fprintf('Solid/Fluid phase segmentation:\n')
+    fprintf('Solid/Fluid Segmentation...\n')
     tempBar = fluidics.ui.progress(0,length(listing),'Initializing');
     for k = 1:length(listing)
         % Read image and compare to the extremum.
@@ -146,30 +153,161 @@ else
 end
 
 % Cleanup
-fprintf('Segmentation of phases completed: %s\n',datestr(treeConfig.TimePhaseSegmented));
+fprintf('Completed: %s\n',datestr(treeConfig.TimePhaseSegmented));
 clear temp*
 
 %% Step 2: Segmentation of fluorescent particles
+fprintf('[Particle Segmentation]\n')
 if isempty(treeConfig.TimeParticleSegmented)
-    particles = repmat(struct('Coordinates',[]),length(listing),1);
+    fprintf('Segmenting Particles')
     % Ensure that all frames are of the same size
-    fprintf('Particle segmentation:\n')
+    particles = cell(length(listing),1);
     tempBar = fluidics.ui.progress(0,length(listing),'Initializing');
     for k = 1:length(listing)
         % Binarize input image masked by the fluid phase
         frame = imread(fullfile(listing(k).folder,listing(k).name));
         frame = frame-imageMinimum;
-        particles(k) = fluidics.ip.particles(frame,maskFluid);
+        particles{k} = fluidics.ip.particles(frame,maskFluid).Coordinates;
         tempBar.update(k,listing(k).name)
     end
     delete(tempBar)
     % Timestamp results
-    treeConfig.Particles = frames;
+    treeConfig.Particles = particles;
     treeConfig.TimeParticleSegmented = datetime;
 else
     particles = treeConfig.Particles;
 end
 
 % Cleanup
-fprintf('Particle segmentation completed: %s\n',datestr(treeConfig.TimeParticleSegmented));
+fprintf('Completed: %s\n',datestr(treeConfig.TimeParticleSegmented));
+clear temp*
+
+%% Step 3: Filtering of stationary particles
+fprintf('[Stationary Particle Filtering]\n')
+if isempty(treeConfig.TimeParticleFiltered)
+    % Compute stationary particles from the first few frames
+    stationaryCutoff = 20;
+    fprintf('Identifying stationary particles (first %d frames)...\n',stationaryCutoff);
+    ST = fluidics.ip.stationary(particles,stationaryCutoff);
+    % Match and remove stationary particles before they expire
+    % For each stationary particle, remove one particle per frame.
+    stationary = vertcat(ST.Points);
+    moving = particles;
+    tempBar = fluidics.ui.progress(0,length(listing),'Initializing');
+    for k = 1:length(listing)
+        temp = stationary(k<=[ST.Lifespan],:);
+        [tempIdx,tempDist] = dsearchn(moving{k},stationary);
+        tempIdx = tempIdx(tempDist<1);
+        moving{k}(unique(tempIdx),:) = [];
+        tempBar.update(k,listing(k).name)
+    end
+    delete(tempBar)
+    % Timestamp results
+    treeConfig.ParticlesStationary = ST;
+    treeConfig.ParticlesMoving = moving;
+    treeConfig.TimeParticleFiltered = datetime;
+else
+    ST = treeConfig.ParticlesStationary;
+    moving = treeConfig.ParticlesMoving;
+    stationary = vertcat(ST.Points);
+end
+
+% Cleanup
+fprintf('Completed: %s\n',datestr(treeConfig.TimeParticleFiltered));
+clear temp*
+
+%% Step 4: Extraction of free boundary cycles
+fprintf('[Free Boundary Cycles]\n')
+if isempty(treeConfig.TimeFreeBoundary)
+    % Computing auxiliary points
+    [~,maskSolidCenters] = fluidics.ip.mask2circ(maskSolid);
+    % Computing free boundary cycles
+    fprintf('Extracting long free boundary cycles...\n')
+    boundaries = cell(length(listing),1);
+    tempBar = fluidics.ui.progress(0,length(listing),'Initializing');
+    for k = 1:length(listing)
+        temp = fluidics.ip.freeboundary(moving{k},maskSolidCenters);
+        if ~isempty(temp)
+            tempIsKept = [temp.Length]>20;
+            temp = temp(tempIsKept);
+        end
+        boundaries{k} = temp;
+        tempBar.update(k,listing(k).name)
+    end
+    delete(tempBar)
+    % Timestamp results
+    treeConfig.FreeBoundaries = boundaries;
+    treeConfig.TimeFreeBoundary = datetime;
+else
+    boundaries = treeConfig.FreeBoundaries;
+end
+
+% Cleanup
+fprintf('Completed: %s\n',datestr(treeConfig.TimeDisplacementFronts));
+clear temp*
+
+%% Step 5: Extraction of displacement fronts
+fprintf('[Displacement Fronts]\n')
+if isempty(treeConfig.TimeDisplacementFronts)
+    % Computing one BWdist for each connected component
+    tempCC = bwconncomp(maskSolid);
+    tempBWDs = cell(tempCC.NumObjects,1);
+    for j = 1:tempCC.NumObjects
+        temp = false([height width]);
+        temp(tempCC.PixelIdxList{j}) = true;
+        tempBWDs{j} = bwdist(temp);
+    end
+    % Computing free boundary cycles
+    fprintf('Extracting fronts...\n')
+    tempBar = fluidics.ui.progress(0,length(listing),'Initializing');
+    fronts = cell(length(listing),1);
+    for k = 1:length(listing)
+        tempFronts = cell.empty;
+        for i = 1:length(boundaries{k})
+            temp = fluidics.ip.partition(boundaries{k}(i),tempBWDs);
+            tempFronts = vertcat(tempFronts,temp);
+        end
+        fronts{k} = tempFronts;
+        tempBar.update(k,listing(k).name)
+    end
+    delete(tempBar)
+    % Timestamp results
+    %treeConfig.Fronts = fronts;
+    %treeConfig.TimeDisplacementFronts = datetime;
+else
+    fronts = treeConfig.Fronts;
+end
+
+% Cleanup
+fprintf('Completed: %s\n',datestr(treeConfig.TimeDisplacementFronts));
+clear temp*
+
+%% Step 6: Interface Tracking
+fprintf('[Interface Tracking]\n')
+if isempty(treeConfig.TimeTracking)
+    fprintf('Tracking the boundary cycles\n')
+    % Performing interface tracking
+    tracker = fluidics.Tracker();
+    tracker.FuncEvolve = @(u,v)...
+        fluidics.core.dist(u.Circumcenter,v.Circumcenter)>abs(u.Circumradius-v.Circumradius)&&...
+        fluidics.core.dist(u.Circumcenter,v.Circumcenter)<u.Circumradius+v.Circumradius;
+    tempBar = fluidics.ui.progress(0,length(listing),'Initializing');
+    for k = 1:length(listing)
+        temp = boundaries{k};
+        if ~isempty(temp)
+            tempIsKept = [temp.Length]>8;
+            temp = temp(tempIsKept);
+        end
+        tracker.linkBack(temp);
+        tempBar.update(k,listing(k).name)
+    end
+    delete(tempBar)
+    % Timestamp results
+    %treeConfig.TimeTracking = datetime;
+else
+    
+end
+
+% Cleanup
+fprintf('Completed: %s\n',datestr(treeConfig.TimeTracking));
 clear temp*
