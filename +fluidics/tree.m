@@ -301,7 +301,11 @@ for k = 1:length(listing)
     tempBar.update(k,listing(k).name)
 end
 delete(tempBar)
-tracker.plot()
+frameLimit = tracker.FrameLimit;
+fluidics.EvolutionChart('Data',tracker,...
+    'Image',maskSolid,'Fronts',fronts,...
+    'FrameLimit',frameLimit,...
+    'Frame',frameLimit(1))
 
 % Cleanup
 fprintf('Completed: %s\n',datetime);

@@ -7,16 +7,15 @@ else
     branches = obj.Branches;
 end
 
-
-
 % Order branches in the order they appear in
 [~,I] = sort([branches.FirstFrame]);
 branches = branches(I);
 rows = zeros(length(branches),1);
 
 % Create initial availability
-firstFrame = obj.FirstFrame;
-finalFrame = obj.FinalFrame;
+frameLimit = obj.FrameLimit;
+firstFrame = frameLimit(1);
+finalFrame = frameLimit(2);
 totalFrames = finalFrame-firstFrame+1;
 blackboard = true(1,totalFrames);
 
@@ -36,7 +35,11 @@ for k = 1:length(branches)
 end
 
 % Create figure
-figure
+
+NameValuePairs = {
+    'Units','Normalized',...
+    'OuterPosition',[0 0 1 1]};
+hFigure = figure(NameValuePairs{:});
 
 % Plot the data points
 hold on
@@ -62,7 +65,7 @@ for k = 1:length(branches)
     hp.DataTipTemplate.DataTipRows = dtrows;
 end
 hold off
-axis ij equal
+axis ij
 box on
 xlabel('Frame')
 ylabel('Branch')
