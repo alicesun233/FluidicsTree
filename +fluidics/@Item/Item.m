@@ -3,6 +3,7 @@ classdef Item < handle
         Value = []
         Frame = NaN
     end
+    
     methods
         function obj = Item(varargin)
             if nargin==2

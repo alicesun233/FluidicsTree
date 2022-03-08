@@ -57,6 +57,9 @@ classdef Tracker < handle
             end
             % Update number summary
             [info.Number] = deal(rows{:});
+            % Update IDS
+            IDs = num2cell([branches.ID]);
+            [info.ID] = deal(IDs{:});
         end
         
         function branches = get.Branches(obj)
@@ -80,6 +83,9 @@ classdef Tracker < handle
                 end
                 idx = idx+1;
             end
+            % Update number
+            IDs = num2cell(1:(length(queue)-1));
+            [queue(2:end).ID] = deal(IDs{:});
             branches = queue(2:end);
         end
     end

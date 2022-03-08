@@ -302,10 +302,14 @@ for k = 1:length(listing)
 end
 delete(tempBar)
 frameLimit = tracker.FrameLimit;
+
+%%
 fluidics.EvolutionChart('Data',tracker,...
-    'Image',maskSolid,'Fronts',fronts,...
+    'Image',im2uint8(maskSolid)/2,...
     'FrameLimit',frameLimit,...
-    'Frame',frameLimit(1))
+    'Frame',frameLimit(1));
+
+%%
 
 % Cleanup
 fprintf('Completed: %s\n',datetime);
