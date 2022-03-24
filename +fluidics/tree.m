@@ -33,6 +33,9 @@ end
 if isempty(who(treeConfig,'TimeDisplacementFronts'))
     treeConfig.TimeDisplacementFronts = [];
 end
+if isempty(who(treeConfig,'TimeTracking'))
+    treeConfig.TimeTracking = [];
+end
 fprintf('Loaded config file: %s\n',treeConfig.Properties.Source)
 
 %% Ask user if they want to use or update current settings
@@ -159,7 +162,7 @@ clear temp*
 %% Step 2: Segmentation of fluorescent particles
 fprintf('[Particle Segmentation]\n')
 if isempty(treeConfig.TimeParticleSegmented)
-    fprintf('Segmenting Particles')
+    fprintf('Segmenting Particles...\n')
     % Ensure that all frames are of the same size
     particles = cell(length(listing),1);
     tempBar = fluidics.ui.progress(0,length(listing),'Initializing');
@@ -195,9 +198,9 @@ if isempty(treeConfig.TimeParticleFiltered)
     moving = particles;
     tempBar = fluidics.ui.progress(0,length(listing),'Initializing');
     for k = 1:length(listing)
-        temp = stationary(k<=[ST.Lifespan],:);
-        [tempIdx,tempDist] = dsearchn(moving{k},stationary);
-        tempIdx = tempIdx(tempDist<1);
+        tempItems = stationary(k<=[ST.Lifespan],:);
+        [tempIdx,tempDists] = dsearchn(moving{k},stationary);
+        tempIdx = tempIdx(tempDists<1);
         moving{k}(unique(tempIdx),:) = [];
         tempBar.update(k,listing(k).name)
     end
@@ -226,12 +229,12 @@ if isempty(treeConfig.TimeFreeBoundary)
     boundaries = cell(length(listing),1);
     tempBar = fluidics.ui.progress(0,length(listing),'Initializing');
     for k = 1:length(listing)
-        temp = fluidics.ip.freeboundary(moving{k},maskSolidCenters);
-        if ~isempty(temp)
-            tempIsKept = [temp.Length]>20;
-            temp = temp(tempIsKept);
+        tempItems = fluidics.ip.freeboundary(moving{k},maskSolidCenters);
+        if ~isempty(tempItems)
+            tempIsKept = [tempItems.Length]>20;
+            tempItems = tempItems(tempIsKept);
         end
-        boundaries{k} = temp;
+        boundaries{k} = tempItems;
         tempBar.update(k,listing(k).name)
     end
     delete(tempBar)
@@ -251,29 +254,28 @@ fprintf('[Displacement Fronts]\n')
 if isempty(treeConfig.TimeDisplacementFronts)
     % Computing one BWdist for each connected component
     tempCC = bwconncomp(maskSolid);
-    tempBWDs = cell(tempCC.NumObjects,1);
+    tempDists = cell(tempCC.NumObjects,1);
     for j = 1:tempCC.NumObjects
-        temp = false([height width]);
-        temp(tempCC.PixelIdxList{j}) = true;
-        tempBWDs{j} = bwdist(temp);
+        tempItems = false([height width]);
+        tempItems(tempCC.PixelIdxList{j}) = true;
+        tempDists{j} = bwdist(tempItems);
     end
     % Computing free boundary cycles
     fprintf('Extracting fronts...\n')
     tempBar = fluidics.ui.progress(0,length(listing),'Initializing');
     fronts = cell(length(listing),1);
     for k = 1:length(listing)
-        tempFronts = cell.empty;
-        for i = 1:length(boundaries{k})
-            temp = fluidics.ip.partition(boundaries{k}(i),tempBWDs);
-            tempFronts = vertcat(tempFronts,temp);
+        tempFronts = {};
+        for tempCycle = boundaries{k}'
+            tempFronts{end+1} = fluidics.ip.partition(tempCycle,tempDists);
         end
-        fronts{k} = tempFronts;
+        fronts{k} = vertcat(tempFronts{:});
         tempBar.update(k,listing(k).name)
     end
     delete(tempBar)
     % Timestamp results
-    %treeConfig.Fronts = fronts;
-    %treeConfig.TimeDisplacementFronts = datetime;
+    treeConfig.Fronts = fronts;
+    treeConfig.TimeDisplacementFronts = datetime;
 else
     fronts = treeConfig.Fronts;
 end
@@ -284,30 +286,31 @@ clear temp*
 
 %% Step 6: Interface Tracking
 fprintf('[Interface Tracking]\n')
-if isempty(treeConfig.TimeTracking)
-    fprintf('Tracking the boundary cycles\n')
-    % Performing interface tracking
-    tracker = fluidics.Tracker();
-    tracker.FuncEvolve = @(u,v)...
-        fluidics.core.dist(u.Circumcenter,v.Circumcenter)>abs(u.Circumradius-v.Circumradius)&&...
-        fluidics.core.dist(u.Circumcenter,v.Circumcenter)<u.Circumradius+v.Circumradius;
-    tempBar = fluidics.ui.progress(0,length(listing),'Initializing');
-    for k = 1:length(listing)
-        temp = boundaries{k};
-        if ~isempty(temp)
-            tempIsKept = [temp.Length]>8;
-            temp = temp(tempIsKept);
-        end
-        tracker.linkBack(temp);
-        tempBar.update(k,listing(k).name)
+fprintf('Tracking the fronts...\n')
+% Performing interface tracking
+tracker = fluidics.Tracker();
+tracker.FuncEvolve = @(u,v)...
+    fluidics.core.dist(u.Circumcenter,v.Circumcenter)<u.Circumradius+v.Circumradius;
+tempBar = fluidics.ui.progress(0,length(listing),'Initializing');
+for k = 1:length(listing)
+    if ~isempty(fronts{k})
+        tempFrame = repmat(k,size(fronts{k}));
+        tempItems = arrayfun(@fluidics.Item,fronts{k},tempFrame);
+        tracker.linkBack(tempItems);
     end
-    delete(tempBar)
-    % Timestamp results
-    %treeConfig.TimeTracking = datetime;
-else
-    
+    tempBar.update(k,listing(k).name)
 end
+delete(tempBar)
+frameLimit = tracker.FrameLimit;
+
+%%
+fluidics.EvolutionChart('Data',tracker,...
+    'Image',im2uint8(maskSolid)/2,...
+    'FrameLimit',frameLimit,...
+    'Frame',frameLimit(1));
+
+%%
 
 % Cleanup
-fprintf('Completed: %s\n',datestr(treeConfig.TimeTracking));
+fprintf('Completed: %s\n',datetime);
 clear temp*
