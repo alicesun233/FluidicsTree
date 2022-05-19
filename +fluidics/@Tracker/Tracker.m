@@ -94,6 +94,11 @@ classdef Tracker < handle
         linkBack(obj,vec)
         optimize(obj)
         plot(obj)
+
+        function remove(obj,branch)
+            obj.Root.Children(obj.Root.Children==branch) = [];
+            delete(branch)
+        end
     end
     
     methods (Access=private)

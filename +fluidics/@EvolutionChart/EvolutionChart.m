@@ -20,6 +20,8 @@ classdef EvolutionChart < matlab.graphics.chartcontainer.ChartContainer
         SavedData = cell.empty
         % Copy of displacement fronts
         SavedFronts = []
+        % Copy of children information
+        SavedChildren = {}
         % The last time when data is updated
         TimeUpdatedData(1,1) datetime = NaT
         TimeUpdatedFrame(1,1) datetime = NaT
@@ -38,9 +40,11 @@ classdef EvolutionChart < matlab.graphics.chartcontainer.ChartContainer
         % Axes: Zoomed-in view of evolution
         MiddleAxes matlab.graphics.axis.Axes
         MiddleLines matlab.graphics.chart.primitive.Line
+        MiddleArrows matlab.graphics.chart.primitive.Line
         % Axes: Global view of evolution
         BottomAxes matlab.graphics.axis.Axes
         BottomLines matlab.graphics.chart.primitive.Line
+        BottomArrows matlab.graphics.chart.primitive.Line
         FrameWindow matlab.graphics.primitive.Patch
         FrameLine matlab.graphics.chart.decoration.ConstantLine
     end
@@ -65,7 +69,12 @@ classdef EvolutionChart < matlab.graphics.chartcontainer.ChartContainer
                 'Branch',num2cell(IDs),...
                 'Frame',num2cell(frames),...
                 'Points',points);
-            
+            % Compute saved parent-children relation
+            func = @(c)[c.ID];
+            PCs = cellfun(func,{branches.Children},'UniformOutput',false);
+            IDs = repelem(1:length(branches),cellfun(@numel,PCs));
+            obj.SavedChildren = [IDs;horzcat(PCs{:})]';
+            % Update timestamp
             obj.TimeUpdatedData = datetime;
         end
         
@@ -149,6 +158,28 @@ classdef EvolutionChart < matlab.graphics.chartcontainer.ChartContainer
                 obj.TopLeftImage.CData = obj.Image;
                 % Update the top right image
                 obj.TopRightImage.CData = obj.Image;
+                % Update children arrows in the middle axes
+                numArrows = length(obj.MiddleArrows);
+                delete(obj.MiddleArrows(numArrows+1:end))
+                obj.MiddleArrows(numArrows+1:end) = [];
+                for k = 1:length(obj.SavedChildren)
+                    bParent = obj.SavedChildren(k,1);
+                    bChild = obj.SavedChildren(k,end);
+                    X = [obj.Data(bParent).Frames(end);
+                         obj.Data(bChild).Frames(1)];
+                    Y = [obj.Data(bParent).Number;
+                         obj.Data(bChild).Number];
+                    if k <= numArrows
+                        % Update data to existing arrows
+                        h = obj.MiddleArrows(k);
+                        set(h,'XData',X,'YData',Y)
+                    else
+                        % Update data to new arrows
+                        hold(obj.MiddleAxes,'on')
+                        h = plot(obj.MiddleAxes,X,Y,'r:','HitTest','off');
+                        obj.MiddleArrows(k) = h;
+                    end
+                end
                 % Update detailed lines in the middle axes
                 numFronts = length(obj.MiddleLines);
                 delete(obj.MiddleLines(numFronts+1:end))
@@ -167,9 +198,31 @@ classdef EvolutionChart < matlab.graphics.chartcontainer.ChartContainer
                         obj.MiddleLines(k) = h;
                     end
                 end
+                updateMiddleDataTipText(obj.MiddleLines,obj.Data)
                 hold(obj.MiddleAxes,'off')
                 ylim(obj.MiddleAxes,[0 max([obj.Data.Number])+1])
-                updateMiddleDataTipText(obj.MiddleLines,obj.Data)
+                % Update children lines in the bottom axes
+                numArrows = length(obj.BottomArrows);
+                delete(obj.BottomArrows(numArrows+1:end))
+                obj.BottomArrows(numArrows+1:end) = [];
+                for k = 1:length(obj.SavedChildren)
+                    bParent = obj.SavedChildren(k,1);
+                    bChild = obj.SavedChildren(k,end);
+                    X = [obj.Data(bParent).Frames(end);
+                         obj.Data(bChild).Frames(1)];
+                    Y = [obj.Data(bParent).Number;
+                         obj.Data(bChild).Number];
+                    if k <= numArrows
+                        % Update data to existing arrows
+                        h = obj.BottomArrows(k);
+                        set(h,'XData',X,'YData',Y)
+                    else
+                        % Update data to new arrows
+                        hold(obj.BottomAxes,'on')
+                        h = plot(obj.BottomAxes,X,Y,'r:','HitTest','off');
+                        obj.BottomArrows(k) = h;
+                    end
+                end
                 % Update simple lines in the bottom axes
                 numFronts = length(obj.BottomLines);
                 delete(obj.BottomLines(numFronts+1:end))
