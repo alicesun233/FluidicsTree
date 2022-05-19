@@ -5,7 +5,8 @@ SCC = regionprops(mask,'Centroid',...
     'MajorAxisLength','MinorAxisLength');
 SD = mean([[SCC.MajorAxisLength]' [SCC.MinorAxisLength]'],2);
 SR = SD/2;
-R = median(SR);
+SRS = sort(SR);
+R = SRS(end-3);
 
 % Filter circles with radius within 3px of the median
 keepCircle = abs(SR-R)<3;
