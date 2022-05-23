@@ -38,15 +38,15 @@ fj2 = -11/6*frame_2(shiftRange2_i,shiftRange2_j(1:end-3))...
 
 fi = 0.5*(fi1+fi2);
 fj = 0.5*(fj1+fj2);
-ft = frame_2(shiftRange1_i,shiftRange1_j)-frame_2(shiftRange2_i,shiftRange2_j);
+ft = frame_2(shiftRange2_i,shiftRange2_j)-frame_1(shiftRange1_i,shiftRange1_j);
 
 fi = fi(:,1:end-3);
 fj = fj(1:end-3,:);
 ft = ft(1:end-3,1:end-3);
 
-A = [sum(fi.*fi,'all') sum(fi.*fj,"all");
-     sum(fi.*fj,"all") sum(fj.*fj,"all")];
-b = -[sum(fi.*ft,"all");
-      sum(fj.*ft,"all")];
+A = [sum(fi.*fi,'all') sum(fi.*fj,'all');
+     sum(fi.*fj,'all') sum(fj.*fj,'all')];
+b = -[sum(fi.*ft,'all');
+      sum(fj.*ft,'all')];
 uv = A\b;
 movement = move'+uv;

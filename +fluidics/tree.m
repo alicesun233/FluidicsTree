@@ -85,6 +85,9 @@ clear temp*
 
 %% Validation
 fprintf('[Input Validation]\n')
+% Generate histogram edges
+EDGES = 0:2:256;
+COUNTS = zeros(1,length(EDGES)-1);
 
 % Read a listing
 listing = dir(fullfile(treeConfig.InputFolder,treeConfig.InputPattern));
@@ -92,9 +95,12 @@ if isempty(treeConfig.TimeValidated)
     % Ensure that all frames are of the same size
     fprintf('Checking frame sizes...\n')
     tempBar = fluidics.ui.progress(0,length(listing),'Initializing');
+
     for k = 1:length(listing)
         tempPath = fullfile(listing(k).folder,listing(k).name);
         tempInfo = imfinfo(tempPath);
+        % Size validation, check if the size of the first frame is kept by
+        % all other images after it
         if k == 1
             height = tempInfo.Height;
             width = tempInfo.Width;
@@ -103,15 +109,26 @@ if isempty(treeConfig.TimeValidated)
             error('Size mismatch: frame %d ([%d %d]), frame 1 ([%d %d])',...
                 k,tempInfo.Height,tempInfo.Width,height,width);
         end
+        % We also attempt to gather the histogram of the pixels across all
+        % frames. Generate histograms for each frame using the same bins
+        % and then tally the results together.
+        frame = imread(tempPath);
+        N = histcounts(frame,EDGES);
+        COUNTS = COUNTS + N;
         tempBar.update(k,listing(k).name)
     end
     delete(tempBar)
+    threshold = round(otsuthresh(COUNTS)*256);
+    treeConfig.T = threshold;
     treeConfig.TimeValidated = datetime;
-elseif ~isempty(listing)
-    tempPath = fullfile(listing(1).folder,listing(1).name);
-    tempInfo = imfinfo(tempPath);
-    height = tempInfo.Height;
-    width = tempInfo.Width;
+else
+    if ~isempty(listing)
+        tempPath = fullfile(listing(1).folder,listing(1).name);
+        tempInfo = imfinfo(tempPath);
+        height = tempInfo.Height;
+        width = tempInfo.Width;
+    end
+    threshold = treeConfig.T;
 end
 
 % Cleanup
@@ -166,11 +183,17 @@ if isempty(treeConfig.TimeParticleSegmented)
     % Ensure that all frames are of the same size
     particles = cell(length(listing),1);
     tempBar = fluidics.ui.progress(0,length(listing),'Initializing');
+    framePrev = imread(fullfile(listing(1).folder,listing(1).name));
     for k = 1:length(listing)
         % Binarize input image masked by the fluid phase
-        frame = imread(fullfile(listing(k).folder,listing(k).name));
-        frame = frame-imageMinimum;
-        particles{k} = fluidics.ip.particles(frame,maskFluid).Coordinates;
+        temp = imread(fullfile(listing(k).folder,listing(k).name));
+        frame = temp-framePrev;
+        T = double(threshold-min(frame,[],'all'))/double(max(frame,[],'all')-min(frame,[],'all'));
+        if ~isfinite(T)
+            T = 0.5;
+        end
+        particles{k} = fluidics.ip.particles(frame,maskFluid,T).Coordinates;
+        framePrev = temp;
         tempBar.update(k,listing(k).name)
     end
     delete(tempBar)
@@ -196,15 +219,19 @@ if isempty(treeConfig.TimeParticleFiltered)
     % For each stationary particle, remove one particle per frame.
     stationary = vertcat(ST.Points);
     moving = particles;
-    tempBar = fluidics.ui.progress(0,length(listing),'Initializing');
-    for k = 1:length(listing)
-        tempItems = stationary(k<=[ST.Lifespan],:);
-        [tempIdx,tempDists] = dsearchn(moving{k},stationary);
-        tempIdx = tempIdx(tempDists<1);
-        moving{k}(unique(tempIdx),:) = [];
-        tempBar.update(k,listing(k).name)
+    if isempty(stationary)
+        fprintf('Stationary list is empty, skipping removal.\n')
+    else
+        tempBar = fluidics.ui.progress(0,length(listing),'Initializing');
+        for k = 1:length(listing)
+            tempItems = stationary(k<=[ST.Lifespan],:);
+            [tempIdx,tempDists] = dsearchn(moving{k},stationary);
+            tempIdx = tempIdx(tempDists<1);
+            moving{k}(unique(tempIdx),:) = [];
+            tempBar.update(k,listing(k).name)
+        end
+        delete(tempBar)
     end
-    delete(tempBar)
     % Timestamp results
     treeConfig.ParticlesStationary = ST;
     treeConfig.ParticlesMoving = moving;
@@ -223,13 +250,25 @@ clear temp*
 fprintf('[Free Boundary Cycles]\n')
 if isempty(treeConfig.TimeFreeBoundary)
     % Computing auxiliary points
-    [~,maskSolidCenters] = fluidics.ip.mask2circ(maskSolid);
+    [maskSolidFixed,maskSolidCenters] = fluidics.ip.mask2circ(maskSolid);
+    % Computing global threshold for phases
+    binsEdge = 0:2:128;
+    countsEdge = size(1,length(binsEdge)-1);
+    tempBar = fluidics.ui.progress(0,length(listing),'Initializing');
+    for k = 1:length(listing)
+        tempPoints = vertcat(moving{k},maskSolidCenters);
+        countsEdge = countsEdge + fluidics.ip.triedgehist(tempPoints,binsEdge);
+        tempBar.update(k,listing(k).name)
+    end
+    delete(tempBar)
+    tempT = otsuthresh(countsEdge);
+    edgeThreshold = binsEdge(ceil(tempT*(length(countsEdge)))+1);
     % Computing free boundary cycles
     fprintf('Extracting long free boundary cycles...\n')
     boundaries = cell(length(listing),1);
     tempBar = fluidics.ui.progress(0,length(listing),'Initializing');
     for k = 1:length(listing)
-        tempItems = fluidics.ip.freeboundary(moving{k},maskSolidCenters);
+        tempItems = fluidics.ip.freeboundary(moving{k},maskSolidCenters,edgeThreshold);
         if ~isempty(tempItems)
             tempIsKept = [tempItems.Length]>20;
             tempItems = tempItems(tempIsKept);
@@ -246,7 +285,7 @@ else
 end
 
 % Cleanup
-fprintf('Completed: %s\n',datestr(treeConfig.TimeDisplacementFronts));
+fprintf('Completed: %s\n',datestr(treeConfig.TimeFreeBoundary));
 clear temp*
 
 %% Step 5: Extraction of displacement fronts
@@ -302,8 +341,21 @@ for k = 1:length(listing)
 end
 delete(tempBar)
 frameLimit = tracker.FrameLimit;
+return
 
-% Optimize hanging branches apart by multiple frames
+%% Step 7: Topological improvements
+% Re-examine all the parent-child relationships by removing them if they
+% are not close to each other.
+CONST_PROXIMITY = 100;
+b = tracker.Branches;
+for i = 1:length(b)
+    bi = b(i);
+    for c = fluidics.core.mat2row(bi.Children)
+
+    end
+end
+
+%% Optimize hanging branches apart by multiple frames
 fprintf('Removing hanging branches...\n')
 CONST_PROXIMITY = 100;
 b = tracker.Branches;
@@ -311,6 +363,7 @@ b = tracker.Branches;
 hanging = ~ismember(1:length(b),unique([vertcat(b.Children).ID]));
 ends = [b.FinalItem];
 ends = [ends.Value];
+tempBar = fluidics.ui.progress(0,length(b),'Initializing');
 for i = find(hanging)
     bi = b(i);
     bipos = bi.FirstItem.Value.Circumcenter;
@@ -328,11 +381,14 @@ for i = find(hanging)
     for j = connection
         b(j).pushChild(b(i));
     end
+    tempBar.update(i,sprintf('Branch %d',bi.ID))
 end
+delete(tempBar)
 % Identify branches that do not have a child
 hanging = cellfun(@isempty,{b.Children});
 ends = [b.FirstItem];
 ends = [ends.Value];
+tempBar = fluidics.ui.progress(0,length(b),'Initializing');
 for i = find(hanging)
     bi = b(i);
     bipos = bi.FinalItem.Value.Circumcenter;
@@ -350,8 +406,11 @@ for i = find(hanging)
     for j = connection
         b(i).pushChild(b(j));
     end
+    tempBar.update(i,sprintf('Branch %d',bi.ID))
 end
-%  Topological analysis begins now
+delete(tempBar)
+
+%% Topological analysis begins now
 something_changed = true;
 while something_changed
     something_changed = false;
@@ -378,82 +437,24 @@ while something_changed
     % Detect conflicting events
     for i = 1:length(b)
         bi = b(i);
-        if length(bi.Children)~=2
+        % (parents of children of)^n until convergence
+        pp = bi;
+        cc = bi.Children;
+        if isempty(cc)
             continue
         end
-        for bc = fluidics.core.mat2row(bi.Children)
-            if length(bc.Parents)~=2
-                continue
-            end
-            bp = bc.Parents(bc.Parents~=b(i));
-            bo = bi.Children(bi.Children~=bc);
-            if bc.FirstFrame ~= bo.FirstFrame
-                continue
-            end
-            % bi  bc
-            %   ZX
-            % bp  bo
-            fully_connected = ismember(bo,bp.Children);
-            fprintf('            [%4d-%d\n',bi.ID,bc.ID)
-            fprintf('ZX detected:[    ')
-            if fully_connected
-                fprintf('X');
-            else
-                fprintf('Z');
-            end
-            fprintf('\n            [%4d-%d\n',bp.ID,bo.ID)
-
-            % if X, resolve to one of the two configurations
-            % Configuration 1: bi-bc
-            %
-            %                  bp-bo
-            % Configuration 2: bi bc
-            %                    X
-            %                  bp bo
-            % by choosing the one with the smaller sum
-            d1 = fluidics.core.dist(bi.FinalItem.Value.Circumcenter,...
-                bc.FirstItem.Value.Circumcenter)+...
-                fluidics.core.dist(bp.FinalItem.Value.Circumcenter,...
-                bo.FirstItem.Value.Circumcenter);
-            d2 = fluidics.core.dist(bi.FinalItem.Value.Circumcenter,...
-                bo.FirstItem.Value.Circumcenter)+...
-                fluidics.core.dist(bp.FinalItem.Value.Circumcenter,...
-                bc.FirstItem.Value.Circumcenter);
-            if d1<d2
-                % delink bi           bc
-                %          \   and   /
-                %           bo     bp
-                bi.Children(bi.Children==bo) = [];
-                bp.Children(bp.Children==bc) = [];
-                bo.Parents(bo.Parents==bi) = [];
-                bc.Parents(bc.Parents==bp) = [];
-                % link bi-bc and bp-bo
-                bi.Children = unique([bi.Children;bc]);
-                bp.Children = unique([bp.Children;bo]);
-                bo.Parents = unique([bo.Parents;bp]);
-                bc.Parents = unique([bc.Parents;bi]);
-            else
-                % delink bi-bc
-                % and
-                %        bp-bo
-                bi.Children(bi.Children==bc) = [];
-                bp.Children(bp.Children==bo) = [];
-                bc.Parents(bc.Parents==bi) = [];
-                bo.Parents(bo.Parents==bp) = [];
-                % link bi           bc
-                %        \   and   /
-                %         bo     bp
-                bi.Children = unique([bi.Children;bo]);
-                bp.Children = unique([bp.Children;bc]);
-                bo.Parents = unique([bo.Parents;bi]);
-                bc.Parents = unique([bc.Parents;bp]);
-            end
-
-            something_changed = true;
-            break
+        np = 0;
+        nc = 0;
+        while length(pp)~=np||length(cc)~=nc
+            nc = length(cc);
+            cc = unique(vertcat(pp.Children));
+            %cc([cc.FirstFrame]~=min([cc.FirstFrame])) = [];
+            np = length(pp);
+            pp = unique(vertcat(cc.Parents));
+            %pp([pp.FinalFrame]~=max([pp.FinalFrame])) = [];
         end
-        if something_changed
-            break
+        if np>=2&&nc>=2
+            error('Unresolved tangling!')
         end
     end
     if something_changed
@@ -564,14 +565,18 @@ while something_changed
             bi.Children(1).Items = [bi.Children(1).Items;fluidics.Item(merged_front,k)]; 
         end
         delete(items)
-        % Remove b(i).Children(2:end) from parents and children
+        % Remove b(i).Children(2:end) from children and parents
+        % then delete these children
         for bc = fluidics.core.mat2row(bi.Children(2:end))
             for bcc = fluidics.core.mat2row(bc.Children)
                 bcc.Parents(bcc.Parents==bc) = [];
             end
+            for bcp = fluidics.core.mat2row(bc.Parents)
+                bcp.Children(bcp.Children==bc) = [];
+            end
             tracker.remove(bc)
         end
-        fprintf('%d branches left\n',bi.ID,length(b)-(length(bi.Children)-1))
+        fprintf('%d branches left\n',length(b)-(length(bi.Children)-1))
         bi.Children(2:end) = [];
 
         something_changed = true;
@@ -593,6 +598,21 @@ while something_changed
     end
     if something_changed
         continue
+    end
+    % Remove singleton branches
+    for i = 1:length(b)
+        bi = b(i);
+        if bi.FinalFrame-bi.FirstFrame>0
+            continue
+        end
+        fprintf('Removing singleton branch %d: %d remaining\n',bi.ID,length(b)-1)
+        for bc = fluidics.core.mat2row(bi.Children)
+            bc.Parents(bc.Parents==bi) = [];
+        end
+        for bp = fluidics.core.mat2row(bi.Parents)
+            bp.Children(bp.Children==bi) = [];
+        end
+        tracker.remove(bi)
     end
 end
 

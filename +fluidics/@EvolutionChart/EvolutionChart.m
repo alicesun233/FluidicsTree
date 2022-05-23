@@ -176,7 +176,7 @@ classdef EvolutionChart < matlab.graphics.chartcontainer.ChartContainer
                     else
                         % Update data to new arrows
                         hold(obj.MiddleAxes,'on')
-                        h = plot(obj.MiddleAxes,X,Y,'r:','HitTest','off');
+                        h = plot(obj.MiddleAxes,X,Y,'r-','HitTest','off');
                         obj.MiddleArrows(k) = h;
                     end
                 end
@@ -194,7 +194,8 @@ classdef EvolutionChart < matlab.graphics.chartcontainer.ChartContainer
                     else
                         % Update data to new lines
                         hold(obj.MiddleAxes,'on')
-                        h = plot(obj.MiddleAxes,X,Y,'.-');
+                        h = plot(obj.MiddleAxes,X,Y,'.-',...
+                            'MarkerSize',12,'LineWidth',2);
                         obj.MiddleLines(k) = h;
                     end
                 end

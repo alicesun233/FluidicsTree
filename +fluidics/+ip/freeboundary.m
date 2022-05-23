@@ -1,4 +1,4 @@
-function FB = freeboundary(P,PS)
+function FB = freeboundary(P,PS,threshold)
 
 % Mark points as auxiliary
 isAuxV = [false(size(P,1),1);true(size(PS,1),1)];
@@ -21,11 +21,11 @@ lenE = fluidics.core.mat2col(cellfun(@rssq,lenE));
 isAuxE = any(ismember(E,find(isAuxV)),2);
 isAuxE = isAuxE|(lenE>min(lenE(isAuxE)));
 % 3. those longer than the length threshold of the remaining edges
-numberOfBins = 256;
-[histN,histE] = histcounts(lenE(~isAuxE),numberOfBins);
-histT = otsuthresh(histN);
-lenThreshE = histE([1 end])*[1-histT;histT];
-isAuxE = isAuxE|(lenE>lenThreshE);
+%numberOfBins = 256;
+%[histN,histE] = histcounts(lenE(~isAuxE),numberOfBins);
+%histT = otsuthresh(histN);
+%lenThreshE = histE([1 end])*[1-histT;histT];
+isAuxE = isAuxE|(lenE>threshold);
 
 % Create an adjacency matrix
 % Identify triangles to keep: all three edges are not marked
@@ -69,6 +69,7 @@ isFinal = [E(1:end-1,2)~=E(2:end,1);true];
 isStart = [true;isFinal(1:end-1)];
 lengths = diff([0;find(isFinal)]);
 S = struct(...
+    'Indices',mat2cell(E(:,1),lengths,1),...
     'Points', mat2cell(P(E(:,1),:),lengths,2),...
     'Length', num2cell(lengths),...
     'Begin',  num2cell(E(isStart,1)),...
@@ -78,11 +79,12 @@ while ~all([S.Closed])
     % Find the first open cycle
     i = find(~[S.Closed],1,'first');
     segment = S(i);
-    % Find the cycle that connects after it
-    j = find([S.Begin]==segment.Final);
+    % Find all non-closed cycle that connects after it
+    j = find([S.Begin]==segment.Final&~[S.Closed]);
     if length(j)~=1||i==j
         error('Cannot resolve segments')
     end
+    segment.Indices = vertcat(segment.Indices,S(j).Indices);
     segment.Points = vertcat(segment.Points,S(j).Points);
     segment.Length = segment.Length+S(j).Length;
     segment.Final = S(j).Final;
@@ -92,6 +94,41 @@ while ~all([S.Closed])
     S(j) = [];
 end
 FB = rmfield(S,{'Begin','Final','Closed'});
+
+% Remove intersections within each loop
+for i = 1:length(FB)
+    cycle = FB(i);
+    F = Inf;
+    while any(F>1)
+        [M,F] = mode(cycle.Indices);
+        if all(F==1)
+            break
+        end
+        m = M(1);
+        inds = find(cycle.Indices==m);
+        lens = zeros(F,1);
+        for j = 1:F
+            if j<F
+                points = cycle.Points(inds(j):inds(j+1)-1,:);
+            else
+                points = cycle.Points([inds(F):end 1:(inds(1)-1)],:);
+            end
+            lens(j) = fluidics.core.perimeter(points);
+        end
+        % Select the longest sub-cycle
+        [~,k] = max(lens);
+        if k<F
+            cycle.Indices = cycle.Indices(inds(k):inds(k+1)-1);
+            cycle.Points = cycle.Points(inds(k):inds(k+1)-1,:);
+        else
+            cycle.Indices = cycle.Indices([inds(k):end 1:(inds(1)-1)]);
+            cycle.Points = cycle.Points([inds(k):end 1:(inds(1)-1)],:);
+        end
+        cycle.Length = length(cycle.Indices);
+    end
+    FB(i) = cycle;
+end
+FB = rmfield(FB,{'Indices'});
 
 % Compute cycle properties
 perimeters = num2cell(cellfun(@fluidics.core.perimeter,{FB.Points}));

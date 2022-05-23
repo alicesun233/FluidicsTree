@@ -1,4 +1,6 @@
-function BW = binarize(I,mask)
+function BW = binarize(I,mask,threshold)
 
-BW = false(size(I));
-BW(mask) = imbinarize(I(mask));
+%error('Function disabled')
+
+BW = imbinarize(I,threshold);
+BW(~mask) = false;

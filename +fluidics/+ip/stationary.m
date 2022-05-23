@@ -4,7 +4,11 @@ function ST = stationary(P,cutoff)
 % This uses a clustering algorithm (linkage/cluster) and calculates
 % from its results a centroid for each cluster
 Pearly = vertcat(P{1:cutoff});
-Z = linkage(Pearly,'ward');
+if isempty(Pearly)
+    ST = struct('Points',{},'Lifespan',{});
+    return
+end
+Z = linkage(Pearly);
 T = cluster(Z,'cutoff',1,'Criterion','distance');
 
 stationary = zeros(length(unique(T)),2);
