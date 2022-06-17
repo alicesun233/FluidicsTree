@@ -1,4 +1,4 @@
-function DF = partition(cycle,bwDists)
+function DF = partition(cycle,centroids,bwDists)
 
 % Compute a strip of proximity labels
 YX = fliplr(fluidics.core.col2cell(ceil(cycle.Points)));
@@ -34,12 +34,13 @@ tape = [labels circshift(labels,-1)];
 isSwitch = all(tape,2)&(tape(:,1)~=tape(:,2));
 switches = find(isSwitch);
 DFCount = CCT.NumObjects+length(switches);
-DF = repmat(struct('Points',[]),DFCount,1);
+DF = repmat(struct('Points',[],'Endpoints',[]),DFCount,1);
 
 % Extract type 1
 for k = 1:CCT.NumObjects
     list = CCT.PixelIdxList{k};
     DF(k).Points = cycle.Points(list,:);
+    DF(k).Endpoints = centroids(labels(CCT.PixelIdxList{k}([1 end])),:);
 end
 
 % Extract type 2
@@ -48,9 +49,14 @@ for i = 1:length(switches)
     idx = switches(i);
     list = labels([idx;mod(idx,length(labels))+1]);
     DF(DFOffset+i).Points = cycle.Points(list,:);
+    DF(DFOffset+i).Endpoints = centroids(tape(idx,:),:);
 end
 
-% Compute parameters
+% Compute parameters:
+% - Number of edges
+% - Is the displacement front closed? (Probably not)
+% - Circumcenter and circumradii
+% -
 func = @(P)size(P,1)-1;
 edgeCounts = num2cell(cellfun(func,{DF.Points}));
 [DF.EdgeCount] = deal(edgeCounts{:});
