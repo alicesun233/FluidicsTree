@@ -261,7 +261,9 @@ if isempty(treeConfig.TimeFreeBoundary)
         tempBar.update(k,listing(k).name)
     end
     delete(tempBar)
-    tempT = otsuthresh(countsEdge);
+    % Take the logarithm of the global bin counts to lessen the bias
+    % towards small (fluid-fluid) edge lengths.
+    tempT = otsuthresh(ceil(log2(countsEdge+1)));
     edgeThreshold = binsEdge(ceil(tempT*(length(countsEdge)))+1);
     % Computing free boundary cycles
     fprintf('Extracting long free boundary cycles...\n')
@@ -306,7 +308,13 @@ if isempty(treeConfig.TimeDisplacementFronts)
     for k = 1:length(listing)
         tempFronts = {};
         for tempCycle = boundaries{k}'
-            tempFronts{end+1} = fluidics.ip.partition(tempCycle,tempDists);
+            % Theoretically should use the output from mask2circ but
+            % mask2circ is buggy at the moment. Moreover, the centroids
+            % supplied to partition must be consistent with the connected
+            % components in that the centroids must be located in the
+            % connected components. (generalized convexity)
+            tempCentroids = vertcat(regionprops(maskSolid).Centroid);
+            tempFronts{end+1} = fluidics.ip.partition(tempCycle,tempCentroids,tempDists); %#ok<SAGROW>
         end
         fronts{k} = vertcat(tempFronts{:});
         tempBar.update(k,listing(k).name)

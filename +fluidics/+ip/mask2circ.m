@@ -38,7 +38,7 @@ clear A B E Ethreshold Ekept
 
 % Of remaining solid regions, obtain a main radius
 Rmode = mode(R);
-Rkept = abs(R-Rmode)<=10;
+Rkept = abs(R-Rmode)./Rmode<=.2;
 if DEBUG_FLAG
     subplot(2,2,2)
     imshow(uint8(mask)*128);
@@ -77,53 +77,77 @@ canvas = insertShape(canvas,...
     'Opacity',     1,...
     'SmoothEdges', false);
 
-% Find the rest of the places where we place circles
-% Voronoi diagram
+% Repeatedly perform infilling based on the voronoi diagram edge point
+% clusters.
+something_changed = true;
+while something_changed
+    something_changed = false;
+    
+    % Find the rest of the places where we place circles
+    % Voronoi diagram
+    [VX,VY] = voronoi(XY(:,1),XY(:,2));
+    VXY = [fluidics.core.mat2col(VX) fluidics.core.mat2col(VY)];
+    VXY = unique(VXY,'row');
+    %VXY(any(VXY<0|VXY>[W H],2),:) = [];
+    
+    minsep = min(pdist(XY))/2;
+    T = cluster(linkage(VXY),...
+        'Cutoff',   minsep,...
+        'Criterion','distance');
+    counts = groupcounts(T);
+    
+    if DEBUG_FLAG
+        subplot(2,2,3)
+        voronoi(XY(:,1),XY(:,2))
+        axis equal tight ij
+        xlim([0 W])
+        ylim([0 H])
+    end
+    
+    for g = fluidics.core.mat2row(find(counts>1)) %#ok<FNDSB>
+        % Find groups of voronoi edge vertices that are close
+        GXY = VXY(T==g,:);
+        % Compute their centroid
+        GC = mean(GXY);
+        XY = [XY;GC];
+        something_changed = true;
+        if DEBUG_FLAG
+            hold on
+            scatter(GC(1),GC(2),'r*')
+            hold off
+            % Insert shape!
+            canvas = insertShape(canvas,...
+                'FilledCircle',[GC Rmode],...
+                'Color',       'white',...
+                'Opacity',     1,...
+                'SmoothEdges', false);
+        end
+    end
+end
+
+% Create circles that are partially outside
 [VX,VY] = voronoi(XY(:,1),XY(:,2));
 VXY = [fluidics.core.mat2col(VX) fluidics.core.mat2col(VY)];
 VXY = unique(VXY,'row');
-VXY(any(VXY<0|VXY>[W H],2),:) = [];
+VXY(all(VXY>=0&VXY<=[W H],2),:) = [];
 
-minsep = min(pdist(XY))/2;
-T = cluster(linkage(VXY),...
-    'Cutoff',   minsep,...
-    'Criterion','distance');
-counts = groupcounts(T);
-
-if DEBUG_FLAG
-    subplot(2,2,3)
-    voronoi(XY(:,1),XY(:,2))
-    axis equal tight ij
-    % hold on
-    % scatter(VXY(:,1),VXY(:,2))
-    % hold off
-end
-
-for g = fluidics.core.mat2row(find(counts>1)) %#ok<FNDSB>
-    % Find groups of voronoi edge vertices that are close
-    GXY = VXY(T==g,:);
-    % Compute their centroid
-    GC = mean(GXY);
-    XY = [XY;GC];
-    if DEBUG_FLAG
-        hold on
-        scatter(GC(1),GC(2),'r*')
-        hold off
-        % Insert shape!
+if ~isempty(VXY)
+    for vxy = VXY'
         canvas = insertShape(canvas,...
-            'FilledCircle',[GC Rmode],...
+            'FilledCircle',[vxy' Rmode],...
             'Color',       'white',...
             'Opacity',     1,...
             'SmoothEdges', false);
     end
 end
 
+if DEBUG_FLAG
+    subplot(2,2,4)
+    imshow(uint8(floor((255*double(mask)+double(canvas(:,:,1)))/2)));
+end
+
 % Convert to mask
 mask = logical(canvas(:,:,1));
 
-if DEBUG_FLAG
-    subplot(2,2,4)
-    imshow(mask)
-end
 
 centers = XY;
