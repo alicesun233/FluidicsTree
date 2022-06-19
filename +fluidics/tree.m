@@ -172,6 +172,14 @@ else
     maskFluid = treeConfig.MaskFluid;
 end
 
+overrideMaskPath = fullfile(scriptConfig.Folder,'mask.png');
+if exist(overrideMaskPath,'file')
+    fprintf('Overriding computed mask with mask.png\n');
+    overrideMask = imread(overrideMaskPath);
+    maskSolid = imbinarize(overrideMask(:,:,1));
+    maskFluid = ~maskSolid;
+end
+
 % Cleanup
 fprintf('Completed: %s\n',datestr(treeConfig.TimePhaseSegmented));
 clear temp*
