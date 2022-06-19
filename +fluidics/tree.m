@@ -212,7 +212,7 @@ clear temp*
 fprintf('[Stationary Particle Filtering]\n')
 if isempty(treeConfig.TimeParticleFiltered)
     % Compute stationary particles from the first few frames
-    stationaryCutoff = 20;
+    stationaryCutoff = 0;
     fprintf('Identifying stationary particles (first %d frames)...\n',stationaryCutoff);
     ST = fluidics.ip.stationary(particles,stationaryCutoff);
     % Match and remove stationary particles before they expire
